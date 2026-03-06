@@ -1,0 +1,15 @@
+p->trapfame->a7 = 7(SYS_exec)
+
+sstatus = 0x22; //past is U mode
+
+
+_entry->start->main(S mode)->userinit->initcode(U mode,exec)->init->sh
+
+
+
+
+trace:  struct proc add traceMask
+
+stat(user space)   is   file{ inode ,....}(kernel  info) that user can get 
+
+sysinfo: kalloc , proc

@@ -145,7 +145,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  p->traceMask = 0;
   return p;
 }
 
@@ -309,9 +309,11 @@ fork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+  
+  np->traceMask = p->traceMask;
 
   pid = np->pid;
-
+  
   release(&np->lock);
 
   acquire(&wait_lock);
@@ -680,4 +682,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void getProc_unused_Num(uint64 *addr){
+	struct proc *p;
+	uint64 procNum = 0;
+	for(p = proc; p < &proc[NPROC]; p++) {
+     		if(p->state != UNUSED){
+     			procNum++;
+     		}
+  	}
+  	*addr = procNum;
 }
