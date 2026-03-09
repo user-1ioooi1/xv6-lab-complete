@@ -1,0 +1,5 @@
+umask,time...
+0:text
+2:data
+417:0100 0001 0111 1能读写
+guard

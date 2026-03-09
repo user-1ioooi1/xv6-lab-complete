@@ -75,7 +75,25 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
-  return 0;
+  uint64 pageAddr,maskAddr;
+  int pageNum;
+  pte_t *pte;
+  int i = 0;
+  unsigned int mask = 0;
+  pagetable_t pagetable = myproc()->pagetable;
+  argaddr(0, &pageAddr);
+  argint(1, &pageNum);
+  argaddr(2, &maskAddr);
+  
+  for(i = 0; i < pageNum; i++){
+  	pte = walk(pagetable, pageAddr + i * PGSIZE, 0); //no alloc
+  	if(*pte & PTE_A){
+  		*pte &= ~PTE_A; //clear
+  		mask |= (1L << i);
+  	}	
+  }
+  
+  return copyout(pagetable, maskAddr, (char *)&mask, sizeof(mask));
 }
 #endif
 
