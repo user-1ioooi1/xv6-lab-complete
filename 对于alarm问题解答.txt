@@ -1,0 +1,6 @@
+Q:为什么修改epc执行alarm_handler ret还能回到中断的位置？
+A：代码的巧合。write:
+		    li a7, SYS_write
+ 		    ecall
+ 		    ret
+系统调用也符合一般函数调用约定，此时返回地址(ra)变为函数(write)的下一句, 也就是说alarm_handler也能回到此函数（write）的下一句。

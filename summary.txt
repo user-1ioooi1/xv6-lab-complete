@@ -1,0 +1,8 @@
+ecall: 1.user mode -> supervisor mode
+       2.pc->spec
+       3.pc<-stvec(trampoline(uservec))
+       
+_entry->start->main(S mode)->userinit->schedule->ret->initcode(U mode,exec)->init->sh
+
+
+uservec(save register)->usertrap(scause == 8)->syscall()->usertrapret

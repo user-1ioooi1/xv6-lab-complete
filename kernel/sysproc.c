@@ -53,7 +53,7 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-
+  backtrace();
   argint(0, &n);
   if(n < 0)
     n = 0;
@@ -91,3 +91,36 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+uint64
+sys_sigalarm(void)
+{
+
+  int nticks;
+  uint64 fn;
+  struct proc *p = myproc();
+  
+  argint(0,&nticks);
+  argaddr(1,&fn);
+ 	
+  if(nticks == 0 || p->intr_running)
+  	return -1;
+
+  p->alarmEnd = nticks;
+  p->alarmTicks = 0;
+  p->alarmHandler = (void (*)())fn;
+
+  return 0;
+}
+
+uint64 sys_sigreturn(void) {
+    struct proc *p = myproc();
+	
+    memmove(p->trapframe, p->trapframe_tmp, sizeof(struct trapframe));
+    p->intr_running = 0;
+    p->alarmTicks = 0;
+    
+    return p->trapframe->a0;
+}
+
