@@ -15,6 +15,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern struct spinlock refcount_lock;
+extern int count[PHYSTOP >> 12];
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -305,31 +308,43 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
+
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
+    
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    
+    if(flags & PTE_W){
+        flags = (flags & ~PTE_W) | PTE_COW;
+        *pte = (*pte & ~PTE_W) | PTE_COW;
+    }
+ 
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+    	if(flags & PTE_COW)
+      		*pte = (*pte & ~PTE_COW) | PTE_W;
       goto err;
     }
-  }
-  return 0;
-
+    
+     acquire(&refcount_lock);
+     count[(uint64)pa >> 12] ++;
+     release(&refcount_lock);
+     
+    }
+    return 0;
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  //uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, i / PGSIZE, 0);
   return -1;
+  
 }
 
 // mark a PTE invalid for user access.
@@ -351,22 +366,52 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
-
+  uint64 n, va0, pa0;	
+  pte_t *pte;
+  uint64 flags;
+  char* newMem;
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (dstva - va0);
-    if(n > len)
-      n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
-
-    len -= n;
-    src += n;
-    dstva = va0 + PGSIZE;
+    pa0 = walkaddr(pagetable,va0);
+    if(pa0 == 0)/*invalid addr*/
+    	return -1;
+    	
+    pte = walk(pagetable, va0, 0);
+    flags = PTE_FLAGS(*pte);
+    if(flags & PTE_COW){
+	    flags = (flags & ~PTE_COW) | PTE_W;
+	    acquire(&refcount_lock);
+	    int refcount = count[(uint64)pa0 >> 12];
+	    release(&refcount_lock);   
+			    	
+	    if(refcount == 1){
+		*pte = PA2PTE(pa0) | flags;
+	    }else{  
+		if((newMem = kalloc()) == 0){
+			return -1;
+					  	
+		}else{
+			acquire(&refcount_lock);
+			count[(uint64)pa0 >> 12]--;
+			release(&refcount_lock); 
+			memmove(newMem,(char *)pa0,PGSIZE);
+			uvmunmap(pagetable,va0,1,0);
+			mappages(pagetable,va0, PGSIZE, (uint64)newMem, flags);  
+			pa0 = (uint64)newMem;
+			
+		}
+	   
+	     }
+	}
+	n = PGSIZE - (dstva - va0);
+	if(n > len)
+		n = len;
+	memmove((void *)(pa0 + (dstva - va0)), src, n);
+	len -= n;
+	src += n;
+	dstva = va0 + PGSIZE;	
   }
+  
   return 0;
 }
 

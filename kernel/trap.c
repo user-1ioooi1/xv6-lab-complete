@@ -11,6 +11,9 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern struct spinlock refcount_lock;
+extern int count[PHYSTOP >> 12];
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -36,6 +39,7 @@ trapinithart(void)
 void
 usertrap(void)
 {
+  //printf("usertrap\n");
   int which_dev = 0;
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
@@ -67,7 +71,52 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 15){ /*write err*/
+  	char *newMem;
+	pte_t *pte;
+	uint64 va = PGROUNDDOWN(r_stval());
+        if(r_stval() >= MAXVA)
+           	p->killed = 1;
+
+        else{	
+        	if((pte = walk(p->pagetable,va,0)) == 0){
+	  		panic("no valid addr\n");
+		}
+	
+		uint64 pa = PTE2PA(*pte);
+        	int flags = PTE_FLAGS(*pte);
+        		
+	    	if((flags & PTE_COW) == 0){ // text
+	    		p->killed = 1;
+	    	}else{
+	    		flags = (flags & ~PTE_COW) | PTE_W;
+	    		
+	    		acquire(&refcount_lock);
+	  		int refcount = count[(uint64)pa >> 12];
+			release(&refcount_lock);   
+		    	
+		    	if(refcount == 1){
+		    		*pte = PA2PTE(pa) | flags;	
+		    	}else{
+		    		acquire(&refcount_lock);
+	  			count[(uint64)pa >> 12]--;
+				release(&refcount_lock);   
+				if((newMem = kalloc()) == 0){
+				  	panic("no addr\n");
+				  	p->killed = 1;
+				  	
+				}else{
+				  	memmove(newMem,(char *)pa,PGSIZE);
+				  	uvmunmap(p->pagetable,va,1,0);
+				 	mappages(p->pagetable,va, PGSIZE, (uint64)newMem, flags);  
+
+				}
+			}
+	    	}	    
+  	}
+  	
+  	
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     setkilled(p);

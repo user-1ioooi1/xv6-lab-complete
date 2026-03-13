@@ -110,6 +110,7 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
+  //printf("alloc proc\n");
 
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
@@ -279,6 +280,7 @@ growproc(int n)
 int
 fork(void)
 {
+//printf("fork\n");
   int i, pid;
   struct proc *np;
   struct proc *p = myproc();
@@ -287,7 +289,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
+	
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);

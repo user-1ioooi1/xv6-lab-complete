@@ -1,0 +1,7 @@
+this char is unsigned
+
+锁
+
+新映射前取消旧映射
+
+修改copyout 防止产生cow的不同步
