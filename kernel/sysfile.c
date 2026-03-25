@@ -121,7 +121,7 @@ sys_fstat(void)
 
 // Create the path new as a link to the same inode as old.
 uint64
-sys_link(void)
+sys_link(void)  //硬链接是在目录中创建一个新的目录项，指向已存在的 inode：
 {
   char name[DIRSIZ], new[MAXPATH], old[MAXPATH];
   struct inode *dp, *ip;
@@ -334,6 +334,30 @@ sys_open(void)
       return -1;
     }
   }
+  
+  if((omode & O_NOFOLLOW) == 0){
+     char symPath[MAXPATH] = { 0 };
+     int count = 0;
+     while(ip->type == T_SYMLINK){
+        if(readi(ip, 0, (uint64)symPath, 0, MAXPATH) <= 0){
+        	iunlockput(ip);
+        	end_op();
+        	return -1;
+        }
+        symPath[MAXPATH-1] = '\0';
+        iunlockput(ip);
+        count++;
+        if(count == 10){
+                end_op();
+        	return -1;
+        }
+        if((ip = namei(symPath)) == 0){
+        	end_op();
+        	return -1;
+        }
+        ilock(ip);
+     }
+  }  
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -352,7 +376,7 @@ sys_open(void)
   if(ip->type == T_DEVICE){
     f->type = FD_DEVICE;
     f->major = ip->major;
-  } else {
+  } else{
     f->type = FD_INODE;
     f->off = 0;
   }
@@ -502,4 +526,54 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void){
+  char new[MAXPATH], target[MAXPATH];
+  //struct inode *ip, *np;
+  struct inode *np;
+  int n;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+    return -1;
+    
+  if(strlen(target) >= MAXPATH)
+        return -1;
+
+  begin_op();
+  //即使 target 不需要存在，系统调用也能成功
+  /*ip = namei(target);
+  
+  ilock(ip);
+  
+  if(ip != 0 && ip->type == T_DIR){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+  
+   if(ip != 0)
+  	iunlockput(ip);
+  */
+  
+  if((np = create(new,T_SYMLINK,0,0)) == 0) //可以不同盘,create里面处理了父目录,已经锁住np
+  {
+     end_op();
+     return -1;
+  }
+  
+  n = strlen(target) + 1;
+  if(writei(np, 0, (uint64)target, 0, n) != n) {//把目标路径写入数据块
+       iunlockput(np);
+       end_op();
+       return -1;
+  }
+
+  iunlockput(np);
+
+  end_op();
+  
+  return 0;
+
 }
