@@ -145,6 +145,11 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  
+  for(int i = 0;i < NMMAPVMA; i++){
+    p->mmap[i].valid = 0;
+    p->mmap[i].mapped = 0;
+  }
 
   return p;
 }
@@ -311,6 +316,13 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+ 
+  for(int j = 0; j < NMMAPVMA; j++){
+  	if(p->mmap[j].valid == 1){
+  		np->mmap[j] = p->mmap[j];
+  		filedup(p->mmap[j].f);
+  	}
+  }
 
   release(&np->lock);
 
@@ -339,7 +351,7 @@ reparent(struct proc *p)
     }
   }
 }
-
+extern uint64 unmap(uint64 addr,uint64 length);
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -361,6 +373,16 @@ exit(int status)
   }
 
   begin_op();
+  for(int i = 0; i < NMMAPVMA; i++){
+  	if(p->mmap[i].valid == 1){
+  		if(p->mmap[i].mapped){
+  		  unmap(p->mmap[i].addr, p->mmap[i].len); //free mem
+  		}else{
+  		  fileclose(p->mmap[i].f);
+  		}
+  		p->mmap[i].valid = 0;
+  	}
+  }
   iput(p->cwd);
   end_op();
   p->cwd = 0;

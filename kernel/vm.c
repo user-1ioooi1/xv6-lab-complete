@@ -115,12 +115,19 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
-    return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
-  if((*pte & PTE_U) == 0)
-    return 0;
+  if(pte == 0){
+  	//printf("pte = 0\n");
+  	return 0;
+  }
+  if((*pte & PTE_V) == 0){
+  	//printf("pte_v\n");
+  	return 0;
+  }
+    
+  if((*pte & PTE_U) == 0){
+  	//printf("pte_u\n");
+  	return 0;
+  }
   pa = PTE2PA(*pte);
   return pa;
 }
@@ -280,6 +287,7 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
+      printf("freewalk: leaf : %d", i);
       panic("freewalk: leaf");
     }
   }

@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -29,6 +33,76 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+int handle_vmaPagefault(struct proc *p){
+	char *pa = 0;
+	int flags = 0;
+	int i = 0;
+	uint64 stval = r_stval();
+	uint64 va = PGROUNDDOWN(stval);
+	if(stval >= MAXVA)
+           	return -1;
+           	
+           	
+        /*if((pte = walk(p->pagetable, (uint64)va , 0)) != 0){ //error can't judge alloc 这可能意味着：页表结构存在（L2、L1 页表已分配）但底层的页表项是 0（所以还是无效的地址)
+     		panic("have vaddr!\n");
+		return -1;
+	 }*/ // == 0 
+	
+        if(walkaddr(p->pagetable, (uint64)va) != 0){ /*  已分配  */
+     		printf("have vaddr!\n");
+		return -1;
+	 }
+	 	
+	for(i = 0; i < NMMAPVMA; i++){
+	  	if(p->mmap[i].valid == 0){
+	  		//printf("valid = 0\n");
+	  		continue;
+	  	}
+	  	if(p->mmap[i].addr + p->mmap[i].len < p->mmap[i].addr)
+	  		return -1;
+	  		
+		if(p->mmap[i].addr <= stval && p->mmap[i].addr + p->mmap[i].len >= stval){
+		        if(p->mmap[i].perm & PROT_READ)
+		        {
+		        	flags |= PTE_R;
+		        }
+		        if(p->mmap[i].perm & PROT_WRITE)
+		        	flags |= PTE_W;
+		        	
+			if((pa = kalloc()) == 0){
+				return -1;
+			}
+			memset(pa,0,PGSIZE);
+
+			if(mappages(p->pagetable,va,PGSIZE,(uint64)pa,flags | PTE_U) != 0){
+				kfree(pa);
+				return -1;
+			}
+			p->mmap[i].mapped = 1;
+			ilock(p->mmap[i].f->ip);
+			
+			if (va >= p->mmap[i].addr){ // goal : this page all data need write
+				uint64 foff = va - p->mmap[i].addr; //file offset
+				readi(p->mmap[i].f->ip, 0, (uint64)pa, foff + p->mmap[i].off, 
+					PGSIZE < p->mmap[i].len - foff ? PGSIZE : p->mmap[i].len - foff); //need conform to PTE flags, need write from pa
+			}else{ // va <  p->mmap[i].addr
+				uint64 foff = p->mmap[i].addr - va;
+				readi(p->mmap[i].f->ip, 0, (uint64)pa + (p->mmap[i].addr - va), p->mmap[i].off, 
+					PGSIZE - foff < p->mmap[i].len ? PGSIZE - foff : p->mmap[i].len);			
+			
+			}
+			iunlock(p->mmap[i].f->ip);
+			
+			
+			return 0;	
+		}
+		
+	}
+
+	return -1; //没分配且不是VMA,illegal addr
+
+}	
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -37,7 +111,8 @@ void
 usertrap(void)
 {
   int which_dev = 0;
-
+  uint64 cause = r_scause();
+  
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
@@ -50,7 +125,7 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(cause == 8){
     // system call
 
     if(killed(p))
@@ -65,7 +140,13 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  }else if(cause == 13 || cause == 15){ //read or write page fault
+  	if(handle_vmaPagefault(p) < 0){
+  		p->killed = 1;	
+  	}
+  		
+  }
+   else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

@@ -79,6 +79,21 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+#define NMMAPVMA 16
+
+struct vm_area{
+  int valid;
+  //mmap参数
+  uint64 addr;
+  uint64 len;
+  int perm;
+  int flags;
+  int off;
+  struct file *f;
+  
+  int mapped;
+};
+
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -104,4 +119,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vm_area mmap[NMMAPVMA];
 };

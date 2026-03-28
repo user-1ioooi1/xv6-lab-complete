@@ -111,12 +111,17 @@ mmap_test(void)
   // offset in the file.
   //
   char *p = mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd, 0);
+
   if (p == MAP_FAILED)
     err("mmap (1)");
   _v1(p);
-  if (munmap(p, PGSIZE*2) == -1)
-    err("munmap (1)");
 
+  if (munmap(p, PGSIZE*2) == -1)
+  {
+  	err("munmap (1)");
+  }
+
+ 
   printf("test mmap f: OK\n");
     
   printf("test mmap private\n");
@@ -197,6 +202,8 @@ mmap_test(void)
   // unmap the rest of the mapped memory.
   if (munmap(p+PGSIZE*2, PGSIZE) == -1)
     err("munmap (4)");
+    
+    
 
   printf("test not-mapped unmap: OK\n");
     
@@ -271,7 +278,7 @@ fork_test(void)
   // read just 2nd page.
   if(*(p1+PGSIZE) != 'A')
     err("fork mismatch (1)");
-
+  
   if((pid = fork()) < 0)
     err("fork");
   if (pid == 0) {

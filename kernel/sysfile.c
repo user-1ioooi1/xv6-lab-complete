@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -502,4 +503,162 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+/*从高地址开始找
+每次遇到重叠就跳到该 VMA 之前*/
+uint64
+find_freespace(struct vm_area m[],uint64 len){  //candidate: [bottom , top)
+  uint64 top, bottom;
+  len = PGROUNDUP(len); // If it is less than one page, pad it to a full page.
+  top = TRAPFRAME;
+  bottom = top - len;
+  for(int i = 0 ; i < NMMAPVMA ; i++){  
+    if(m[i].valid == 0)
+      continue;
+    if(!(top < m[i].addr || bottom >=  m[i].addr + PGROUNDUP(m[i].len))){ //重叠
+    	top = m[i].addr;
+    	bottom = m[i].addr - len;
+    }
+  }
+
+  return bottom;
+}
+
+uint64
+sys_mmap(void)
+{
+	uint64 addr;
+	size_t length;
+	int prot;
+	int flags;
+	int fd;
+	off_t offset;
+	struct proc *p = myproc();
+	
+	
+	argaddr(0, &addr);
+	
+	
+	argaddr(1,&length); //error 
+	
+	
+	if(addr == 0)
+	  addr = find_freespace(p->mmap,length); //必须页对齐,否则trap可能遗漏
+	
+	
+	argint(2,&prot);
+	
+	argint(3,&flags);
+	
+	argint(4,&fd);
+	
+	if(fd < 0 || fd >= NOFILE || p->ofile[fd] == 0)
+    		return -1;
+	
+        argaddr(5,(uint64 *)&offset);
+        
+        if((prot & PROT_READ)  && p->ofile[fd]->readable == 0){
+        		return -1;
+        }
+        
+        if((prot & PROT_WRITE)  && p->ofile[fd]->writable == 0){
+        	if(flags & MAP_SHARED)
+        		return -1;
+        }
+        
+        for(int i = 0; i < NMMAPVMA; i++){
+        	if(p->mmap[i].valid == 0){
+        		p->mmap[i].valid = 1;
+			p->mmap[i].addr = addr;
+			p->mmap[i].len = length;
+			p->mmap[i].perm = prot;
+			p->mmap[i].flags = flags;
+			p->mmap[i].off = offset;
+			p->mmap[i].f = p->ofile[fd];
+			filedup(p->mmap[i].f);
+			break;
+        	}
+        	else{
+			if(i == NMMAPVMA - 1)
+				panic("no mmap\n");
+        	}  	
+        }
+	
+
+	return addr;
+}
+
+uint64 
+unmap(uint64 addr, uint64 length){
+	struct proc *p = myproc();
+	uint64 va,pa;
+	uint64 npages = 0;
+	va = PGROUNDDOWN(addr);
+	uint64 len = PGROUNDUP(length);
+	uint64 olength = length;
+	for(int i = 0; i < NMMAPVMA; i++){
+		if(p->mmap[i].valid == 0){
+			continue;
+		}
+		
+		if(addr >= p->mmap[i].addr && addr < p->mmap[i].addr + p->mmap[i].len){
+			if(va + length > p->mmap[i].addr + p->mmap[i].len){ // len chao guo le 
+				//printf("> \n");
+				return -1;
+			}
+			npages = len / PGSIZE; /* * */
+			
+			begin_op();
+			ilock(p->mmap[i].f->ip);
+			for(int j = 0; j < npages; j++){
+			  uint64 off = va -  p->mmap[i].addr;
+		   	  // 遍历要解除映射的每一页，检查这一页是否已经被映射， 页面已经映射，需要释放,没映射跳过
+		          if((pa = walkaddr(p->pagetable,va)) == 0){
+				 //printf("unmap \n");/* * */
+				 //return -1;
+			    va += PGSIZE;
+			    length -= PGSIZE;
+			    continue;
+			   }
+			   if(p->mmap[i].flags & MAP_SHARED){
+				writei(p->mmap[i].f->ip, 0 , pa , off + p->mmap[i].off, length < PGSIZE ? length : PGSIZE);
+			   }
+			   uvmunmap(p->pagetable,va,1,1);
+		           va += PGSIZE;
+		           length -= PGSIZE;
+			 }
+			 iunlock(p->mmap[i].f->ip);
+			 end_op();
+			
+			if(len < p->mmap[i].len){  // va > p->mmap[i].addr -> p->mmap[i].addr  va < p->mmap[i].addr -> va + length
+				p->mmap[i].len -= olength;
+				p->mmap[i].addr = PGROUNDDOWN(addr) > p->mmap[i].addr ? p->mmap[i].addr : p->mmap[i].addr + npages * PGSIZE ;
+				p->mmap[i].off = p->mmap[i].off + olength;
+				//printf("part unmap \n");
+			}else{
+				fileclose(p->mmap[i].f);
+				p->mmap[i].mapped = 0;
+				p->mmap[i].valid = 0;
+				//printf("part unmap \n");
+			}
+			break;
+		}
+		if(i ==  NMMAPVMA - 1)
+		{
+			printf("i ==  NMMAPVMA - 1\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+
+uint64
+sys_munmap(void)
+{
+	uint64 addr;
+	size_t length;
+	argaddr(0, &addr);
+	argaddr(1,&length);
+	return unmap(addr,length);
 }
