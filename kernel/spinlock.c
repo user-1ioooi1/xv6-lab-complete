@@ -63,7 +63,7 @@ acquire(struct spinlock *lk)
 {
   push_off(); // disable interrupts to avoid deadlock.
   if(holding(lk))
-    panic("acquire");
+    panic("acquire"); //当前 CPU 是否已经持有了这个锁
 
 #ifdef LAB_LOCK
     __sync_fetch_and_add(&(lk->n), 1);

@@ -103,6 +103,27 @@ e1000_transmit(struct mbuf *m)
   // a pointer so that it can be freed after sending.
   //
   
+  acquire(&e1000_lock);
+  uint32 idx = regs[E1000_TDT]; //indicates the location beyond the last descriptor hardware can process. This is the location where software writes the first new descriptor.
+  if(!(tx_ring[idx].status & E1000_TXD_STAT_DD)){ //E1000 尚未完成相应的先前发送请求
+  	printf("buffer overflow\n");
+  	release(&e1000_lock);
+  	return -1;
+  }else if(tx_mbufs[idx] != 0){
+  	mbuffree(tx_mbufs[idx]);
+  }
+  
+  tx_ring[idx].addr = (uint64)m->head;
+  tx_ring[idx].length = m->len;
+  tx_ring[idx].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS; // EOP表示这是组成该报文的最后一个描述符
+  //RS确定哪些描述符已完成以及报文已缓冲到发送FIFO中,软件通过查看描述符状态字节并检查描述符完成（DD）位来实现
+
+  tx_mbufs[idx] = m;
+  
+  regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+  
+  release(&e1000_lock);
+  
   return 0;
 }
 
@@ -115,6 +136,47 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  struct mbuf *m;
+  uint32 idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+ /* while(rx_ring[idx].status & E1000_RXD_STAT_DD){ //E1000 完成相应的接收
+	  acquire(&e1000_lock);
+	  
+	  m = mbufalloc(0);
+	  if (!rx_mbufs[idx])
+	      panic("e1000");
+	  
+	  m->len = rx_ring[idx].length;
+	  memmove(m->head,(char*)rx_ring[idx].addr,m->len);
+	  rx_ring[idx].status = 0;
+	  
+	  release(&e1000_lock);
+	  net_rx(m);
+	  
+	  regs[E1000_RDT] = idx;
+    	  idx = (regs[E1000_RDT]+1)%RX_RING_SIZE;
+	  
+   }*/	  
+   
+   while(rx_ring[idx].status & E1000_RXD_STAT_DD){ //E1000 完成相应的接收
+	  acquire(&e1000_lock);
+	  
+	  m = rx_mbufs[idx];
+	  m->len = rx_ring[idx].length;
+	  
+	  rx_mbufs[idx] = mbufalloc(0);
+	  if (!rx_mbufs[idx])
+	      panic("e1000");
+	      
+	  rx_ring[idx].addr = (uint64)rx_mbufs[idx]->head;
+	  rx_ring[idx].status = 0;
+	  regs[E1000_RDT] = idx;
+    	  idx = (regs[E1000_RDT]+1)%RX_RING_SIZE;
+	  release(&e1000_lock);
+	  
+	  
+	  net_rx(m);  
+   }
+  
 }
 
 void
